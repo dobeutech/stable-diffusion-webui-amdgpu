@@ -1,162 +1,152 @@
 # AGENTS.md
 
-## Project snapshot
+## Repository overview
 
-- Python/Gradio Stable Diffusion Web UI fork with AMD GPU support.
-- Supported backends include ROCm, DirectML, ZLUDA, ONNX Runtime, and Olive.
-- Python 3.10, 3.11, and 3.12 are accepted on Linux; CI uses Python 3.10.6 for tests and Python 3.11 for linting.
-- This is a single application, not a monorepo.
-- Run commands from the repository root.
+- Python Stable Diffusion WebUI with AMD GPU support through DirectML, ZLUDA, and ROCm-related launch paths.
+- Python 3.10.6 is the CI baseline; the Linux launcher prefers `python3.10` and falls back to `python3`.
+- Run commands from the repository root unless noted otherwise.
 
-## Setup and development
+## Setup and run
 
-### Linux prerequisites
+### Linux
 
-Use the command for the host distribution:
+Install the platform prerequisites listed in `README.md`, then let the launcher create `venv/` and install runtime dependencies:
 
 ```bash
-# Debian/Ubuntu
-sudo apt install wget git python3 python3-venv libgl1 libglib2.0-0
-
-# Fedora/Red Hat
-sudo dnf install wget git python3 gperftools-libs libglvnd-glx
-
-# openSUSE
-sudo zypper install wget git python3 libtcmalloc4 libglvnd
-
-# Arch
-sudo pacman -S wget git python3
-```
-
-### Install and run
-
-```bash
-# Creates venv/, installs Python/runtime dependencies, and starts the UI.
 ./webui.sh
-
-# Install JavaScript lint tooling. This is the command used in CI.
-npm i --ci
 ```
 
-- Windows entry point: `webui-user.bat`, which delegates to `webui.bat`.
-- Put local launcher configuration in `webui-user.sh`; `webui.sh` explicitly says not to edit it.
-- Pass backend flags through the launcher, for example `./webui.sh --use-rocm`, `./webui.sh --use-directml`, or `./webui.sh --use-zluda`.
-- There is no separate build command; the Python launcher prepares the environment and starts the app.
+Configure Python, the virtual environment, Torch installation, or launch arguments in `webui-user.sh`. Examples:
 
-### CPU test environment (matches CI)
+```bash
+export COMMANDLINE_ARGS="--use-zluda"
+./webui.sh
+```
+
+```bash
+export COMMANDLINE_ARGS="--use-directml"
+./webui.sh
+```
+
+Prepare dependencies without keeping the server running, as CI does:
+
+```bash
+python launch.py --skip-torch-cuda-test --exit
+```
+
+### Windows
+
+Run the checked-in launcher; it performs first-run setup and starts the server:
+
+```bat
+webui-user.bat
+```
+
+### Test and lint tooling
 
 ```bash
 python -m pip install wait-for-it -r requirements-test.txt
-TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu \
-  WEBUI_LAUNCH_LIVE_OUTPUT=1 \
-  python launch.py --skip-torch-cuda-test --exit
+python -m pip install ruff==0.3.3
+npm i --ci
 ```
+
+- There is no separate build command in this repository.
 
 ## Tests
 
-Most tests exercise the HTTP API and require the test server. Start it in one terminal:
+Most tests call a live WebUI at `http://127.0.0.1:7860`. Start a test server in one terminal:
 
 ```bash
-python -m coverage run \
-  --data-file=.coverage.server \
-  launch.py \
-  --skip-prepare-environment \
-  --skip-torch-cuda-test \
-  --test-server \
-  --do-not-download-clip \
-  --no-half \
-  --disable-opt-split-attention \
-  --use-cpu all \
-  --api-server-stop
+python launch.py --test-server
 ```
 
-Then run tests in another terminal:
+For a CPU-only baseline, use the CI launch options:
 
 ```bash
-# Full suite, as run in CI
-wait-for-it --service 127.0.0.1:7860 -t 20
-python -m pytest -vv --junitxml=test/results.xml --cov . --cov-report=xml --verify-base-url test
+python launch.py --skip-prepare-environment --skip-torch-cuda-test --test-server --do-not-download-clip --no-half --disable-opt-split-attention --use-cpu all --api-server-stop
+```
 
-# One test file
+Run tests in another terminal:
+
+```bash
+# Full suite
+python -m pytest -vv --verify-base-url test
+
+# One file
 python -m pytest -vv --verify-base-url test/test_txt2img.py
 
-# One API test
+# One test
 python -m pytest -vv --verify-base-url test/test_txt2img.py::test_txt2img_simple_performed
 
-# Focused unit test that does not need the API server
+# Standalone utility test that does not call the live API
 python -m pytest -vv test/test_torch_utils.py
-
-# One parameterized unit-test case
-python -m pytest -vv 'test/test_torch_utils.py::test_get_param[True]'
 ```
 
-Stop the CI-style server when finished:
+CI runs the suite with coverage and JUnit output:
 
 ```bash
-curl -XPOST http://127.0.0.1:7860/sdapi/v1/server-stop
+python -m pytest -vv --junitxml=test/results.xml --cov . --cov-report=xml --verify-base-url test
 ```
 
-## Lint and formatting
+## Lint and format
 
-Run both CI linters before committing:
+Run before committing:
 
 ```bash
+# Python; matches the `ruff` CI check
 ruff check .
+
+# JavaScript; matches the `eslint` CI check
 npm run lint
 ```
 
-Available automatic lint fixes:
+The repository provides an ESLint autofix command:
 
 ```bash
-ruff check --fix .
 npm run fix
 ```
 
-- CI installs Ruff with `python -m pip install ruff==0.3.3`.
-- No standalone formatter is configured in this repository.
-- Ruff excludes `extensions/` and `extensions-disabled/`; ESLint exclusions are in `.eslintignore`.
+- No repository-wide Python formatter command is configured.
 
 ## Pull requests
 
-- Base branch: `master` is the remote's default and only published branch.
-- Known CI inconsistency: the inherited `Pull requests can't target master branch` workflow fails PRs against `master` and recommends `dev`, but this remote does not publish a `dev` branch.
-- Source branch naming: no naming convention is enforced in repository configuration.
-- Commit messages: no required format is enforced in repository configuration.
-- Required-check/branch-protection settings are not checked into the repository; the workflows below are the checks defined in source.
-- PR description must summarize the change and list fixed issues; include screenshots or videos for visual changes.
-- Complete the PR-template checklist: read the contributing guide, self-review, follow style guidance, and run tests.
-- All paths are covered by `CODEOWNERS` entry `* @AUTOMATIC1111`.
-- CI checks expected to pass:
-  - `Linter / ruff`: `ruff check .`
-  - `Linter / eslint`: `npm run lint`
-  - `Tests / tests on CPU with empty model`: full pytest/API suite
-  - `Pull requests can't target master branch / check`: applies when a PR targets `master` and fails by design
+- Create a topic branch; do not submit from a clone's `master` or `main` branch.
+- Target `dev`. PRs targeting `master` fail the `Pull requests can't target master branch` workflow.
+- No branch-prefix convention is documented; use a short, descriptive branch name.
+- No commit-message format is documented; keep commits scoped to the change.
+- Keep unrelated changes in separate PRs. Do not submit reformat-only changes.
+- Bug fixes must include reproduction steps.
+- Complete the PR template: description, summary, fixed issues, relevant screenshots/videos, self-review, style, and test checklist.
+- Installation-script or dependency changes must be verified from a fresh default Windows installation unless the changed path is explicitly non-Windows.
+- Pass the applicable repository checks defined in `.github/workflows/`:
+  - `Linter / ruff`
+  - `Linter / eslint`
+  - `Tests / tests on CPU with empty model`
+  - `Pull requests can't target master branch / check` enforces the target-branch rule.
 
 ## Key directories
 
-| Path | Purpose |
-| --- | --- |
-| `launch.py` | Application entry point; delegates environment preparation and startup to `modules/launch_utils.py`. |
-| `webui.py` | Gradio UI/API initialization and server lifecycle. |
-| `modules/` | Core Python application, launch/runtime logic, processing, model integrations, and UI code. |
-| `modules/api/` | HTTP API implementation and API models. |
-| `modules/dml/` | DirectML-specific runtime support. |
-| `modules/onnx_impl/` | ONNX Runtime and Olive integration. |
-| `modules/flash_attn_triton_amd/` | AMD Triton flash-attention implementation. |
-| `test/` | Pytest suite, fixtures, input assets, and generated test outputs. |
-| `javascript/` | Browser-side UI behavior. |
-| `html/` | HTML fragments and license content used by the UI. |
-| `scripts/` | Built-in generation and post-processing scripts loaded by the app. |
-| `extensions-builtin/` | Extensions shipped with the application. |
-| `extensions/` | User-installed extensions; excluded from Ruff checks. |
-| `models/` | Runtime model storage organized by model type. |
-| `configs/` | Stable Diffusion and Olive model configuration files. |
-| `localizations/` | Drop-in UI localization files. |
-| `textual_inversion_templates/` | Prompt templates for textual inversion and hypernetwork training. |
-| `requirements*.txt` | Runtime, pinned, NPU, and test Python dependency sets. |
-| `.github/workflows/` | Ruff, ESLint, pytest, and PR-target CI definitions. |
+- `modules/`: core Python application, launch, API, processing, UI, and model integration code.
+- `javascript/`: browser-side WebUI behavior; linted by ESLint with `script.js`.
+- `extensions-builtin/`: extensions shipped with the application.
+- `extensions/`: locally installed third-party extensions; excluded from Ruff checks.
+- `test/`: pytest suite, fixtures, test images, and generated test output location.
+- `models/`: runtime model storage organized by model type.
+- `configs/`: Stable Diffusion model configuration files.
+- `scripts/`: built-in user-facing processing scripts.
+- `html/`: reusable HTML fragments used by the UI.
+- `localizations/`: UI translation JSON files.
+- `embeddings/`: textual-inversion embedding storage.
+- `textual_inversion_templates/`: prompt templates for textual-inversion training.
+- `.github/workflows/`: lint, test, and pull-request target CI definitions.
 
-## Generated and local-only files
+## Important entry points and configuration
 
-- Do not commit virtual environments, `node_modules/`, models/checkpoints, `outputs/`, coverage data, local configuration, or test outputs; these paths are ignored in `.gitignore`.
-- `webui-user.sh` and `webui-user.bat` are ignored local override files.
+- `launch.py`: environment preparation and application launcher used by CI.
+- `webui.py`: WebUI initialization and server startup.
+- `webui.sh` / `webui-user.bat`: supported Linux and Windows setup/start entry points.
+- `webui-user.sh`: user-overridable Linux launcher variables; edit this instead of `webui.sh`.
+- `requirements_versions.txt`: pinned Python 3.10.6 runtime dependencies.
+- `requirements-test.txt`: pytest and coverage-related dependencies.
+- `pyproject.toml`: Ruff and pytest configuration.
+- `package.json` / `.eslintrc.js`: JavaScript lint and autofix commands/rules.
