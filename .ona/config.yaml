@@ -1,0 +1,41 @@
+tasks:
+  install-dependencies:
+    name: Install dependencies
+    description: Install the Python, test, and JavaScript dependencies used by the repository.
+    command: |
+      python -m venv venv
+      venv/bin/python -m pip install --upgrade pip
+      venv/bin/python -m pip install wait-for-it ruff==0.3.3 -r requirements-test.txt
+      PIP_DISABLE_PIP_VERSION_CHECK=1 \
+      PIP_PROGRESS_BAR=off \
+      TORCH_COMMAND="pip install torch==2.7.1 torchvision numpy==1.26.4 --index-url https://download.pytorch.org/whl/cpu" \
+      WEBUI_LAUNCH_LIVE_OUTPUT=1 \
+        venv/bin/python launch.py --use-cpu-torch --skip-torch-cuda-test --exit
+      npm install
+    triggeredBy:
+      - manual
+      - postDevcontainerStart
+      - prebuild
+
+services:
+  web-ui:
+    name: Stable Diffusion Web UI
+    description: Run the repository's CPU-safe test-mode web UI on port 7860.
+    commands:
+      start: |
+        ona environment port open 7860 --admission creator_only --name "Stable Diffusion Web UI"
+        until [ -x venv/bin/python ]; do sleep 5; done
+        exec venv/bin/python launch.py \
+          --skip-prepare-environment \
+          --skip-torch-cuda-test \
+          --test-server \
+          --do-not-download-clip \
+          --no-half \
+          --disable-opt-split-attention \
+          --use-cpu all \
+          --listen \
+          --api-server-stop
+      ready: curl -fsS http://localhost:7860/ > /dev/null
+    triggeredBy:
+      - manual
+      - postEnvironmentStart

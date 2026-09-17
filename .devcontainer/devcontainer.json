@@ -1,0 +1,12 @@
+{
+  "name": "stable-diffusion-webui-amdgpu",
+  "build": {
+    "context": ".",
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node": {
+      "version": "18"
+    }
+  }
+}
