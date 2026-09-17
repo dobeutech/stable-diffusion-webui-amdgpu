@@ -1,138 +1,132 @@
 # AGENTS.md
 
-## Repository scope
+## Repository overview
 
-- Single Python/Gradio application; this is not a monorepo.
-- Supported launcher Python is 3.10 by default (`webui.sh` falls back to `python3`); CI tests use Python 3.10.6 and lint uses Python 3.11.
-- Run commands from the repository root.
+- Python 3.10 is the CI runtime; `README.md` specifically recommends Python 3.10.6 on Windows.
+- `launch.py` prepares dependencies and starts the application.
+- `webui.sh` / `webui-user.sh` are the Linux launch and local-configuration scripts.
+- `webui.bat` / `webui-user.bat` are the Windows equivalents.
+- There is no separate build command in this repository.
 
 ## Setup and run
 
 ### Linux
 
-```bash
-# Debian/Ubuntu prerequisites (other distributions are listed in README.md)
-sudo apt install wget git python3 python3-venv libgl1 libglib2.0-0
+The launcher creates `venv/`, installs missing application dependencies, and starts the Web UI:
 
-# Create the venv, install application dependencies, and start the dev server
+```bash
 ./webui.sh
 ```
 
-- Put local launcher overrides such as `python_cmd`, `venv_dir`, and `COMMANDLINE_ARGS` in `webui-user.sh`; do not edit `webui.sh` for local configuration.
-- AMD backend examples: `COMMANDLINE_ARGS="--use-directml" ./webui.sh` or `COMMANDLINE_ARGS="--use-zluda" ./webui.sh`.
-- Windows entry point: `webui-user.bat` (delegates to `webui.bat`).
-- There is no separate build command; the launcher prepares the Python environment before starting the app.
+Set local launch variables such as `python_cmd`, `COMMANDLINE_ARGS`, or `TORCH_COMMAND` in `webui-user.sh`; do not edit `webui.sh` for local configuration.
 
-### CI-style dependency setup
+AMD launch modes documented by the repository:
 
 ```bash
-# Test tooling
-pip install wait-for-it -r requirements-test.txt
+./webui.sh --use-directml
+./webui.sh --use-zluda
+```
 
-# Resolve/install app dependencies without starting the server
-TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu \
-  python launch.py --skip-torch-cuda-test --exit
+### Windows
 
-# JavaScript lint tooling (command used by CI)
-npm i --ci
+Run:
+
+```bat
+webui-user.bat
+```
+
+Put local launch options in `webui-user.bat`.
+
+### CI-compatible test environment
+
+The test workflow installs and prepares dependencies with:
+
+```bash
+python3.10 -m venv venv
+source venv/bin/activate
+python -m pip install wait-for-it -r requirements-test.txt
+TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu python launch.py --skip-torch-cuda-test --exit
 ```
 
 ## Tests
 
-### Fast or targeted tests
+Most tests call the API at `http://127.0.0.1:7860`. Start the CPU test server in one terminal:
 
 ```bash
-# Standalone unit-test file (does not require the API server)
+python launch.py --skip-prepare-environment --skip-torch-cuda-test --test-server --do-not-download-clip --no-half --disable-opt-split-attention --use-cpu all --api-server-stop
+```
+
+Then run the full suite in another terminal:
+
+```bash
+wait-for-it --service 127.0.0.1:7860 -t 20
+python -m pytest -vv --junitxml=test/results.xml --cov . --cov-report=xml --verify-base-url test
+```
+
+Run one test file:
+
+```bash
+python -m pytest -vv --verify-base-url test/test_txt2img.py
+```
+
+Run one test function:
+
+```bash
+python -m pytest -vv --verify-base-url test/test_txt2img.py::test_txt2img_simple_performed
+```
+
+Run the standalone Torch utility tests without an API server:
+
+```bash
 python -m pytest -vv test/test_torch_utils.py
-
-# One test function
-python -m pytest -vv test/test_torch_utils.py::test_get_param
-
-# Collect tests without running them
-python -m pytest --collect-only -q test
-```
-
-Most tests under `test/` call the live API at `http://127.0.0.1:7860` (configured in `pyproject.toml`). Start the CI test server before running the full suite:
-
-```bash
-python -m coverage run --data-file=.coverage.server launch.py \
-  --skip-prepare-environment \
-  --skip-torch-cuda-test \
-  --test-server \
-  --do-not-download-clip \
-  --no-half \
-  --disable-opt-split-attention \
-  --use-cpu all \
-  --api-server-stop
-```
-
-In another shell:
-
-```bash
-# Full CI test command
-python -m pytest -vv --junitxml=test/results.xml \
-  --cov . --cov-report=xml --verify-base-url test
-
-# One API test while the server is running
-python -m pytest -vv --verify-base-url \
-  test/test_txt2img.py::test_txt2img_simple_performed
-```
-
-Stop the test server when finished:
-
-```bash
-curl -XPOST http://127.0.0.1:7860/sdapi/v1/server-stop
 ```
 
 ## Lint and format
 
-Run both CI linters before committing:
+Install the exact lint dependencies used by CI:
+
+```bash
+python -m pip install ruff==0.3.3
+npm i --ci
+```
+
+Run before committing:
 
 ```bash
 ruff check .
 npm run lint
 ```
 
-Available automatic JavaScript fix command:
+Apply the repository's available JavaScript auto-fix command:
 
 ```bash
 npm run fix
 ```
 
-- Ruff configuration lives in `pyproject.toml`; CI pins `ruff==0.3.3`.
-- ESLint configuration lives in `.eslintrc.js`; `npm run fix` is the only configured formatter/fixer.
+No Python formatter command is configured.
 
 ## Pull requests
 
-- Target `dev`. The `Pull requests can't target master branch` workflow deliberately fails PRs whose base is `master`.
-- No branch-name pattern is configured in the repository; use a short descriptive branch name.
-- No commit-message format is configured in the repository; keep commit subjects concise and descriptive.
-- Complete `.github/pull_request_template.md`: description, change summary, linked issues, screenshots/video when applicable, self-review, style, and tests.
-- Repository-defined PR CI checks (branch-protection requirements are not stored in this repository):
-  - `Linter / ruff`: `ruff check .`
-  - `Linter / eslint`: `npm run lint`
-  - `Tests / tests on CPU with empty model`: live-server pytest suite
-  - `Pull requests can't target master branch / check`: base-branch guard
+- Target `dev`; `.github/workflows/warns_merge_master.yml` fails pull requests targeting `master`.
+- No head-branch naming convention is defined in repository files.
+- No commit-message format or commit-lint check is defined in repository files.
+- Complete `.github/pull_request_template.md`: describe the goal and changes, link fixed issues, add screenshots/videos when relevant, self-review, follow the linked style guide, and run tests.
+- CI workflow checks: `ruff`, `eslint`, and `tests on CPU with empty model`.
 
-## Key paths
+## Key directories
 
-| Path | Purpose |
-| --- | --- |
-| `launch.py` | Thin application entry point; delegates environment preparation and startup to `modules/launch_utils.py`. |
-| `webui.py` | Gradio UI/API initialization and server lifecycle. |
-| `modules/` | Core Python implementation, including API, model backends, processing, UI, and AMD/DirectML/ONNX support. |
-| `javascript/` | Browser-side UI behavior; covered by ESLint. |
-| `scripts/` | Built-in generation and post-processing scripts exposed by the UI. |
-| `extensions-builtin/` | Extensions shipped with the application. Ruff excludes extension directories. |
-| `test/` | Pytest unit and live-API tests, fixtures, input assets, and generated test outputs. |
-| `configs/` | Stable Diffusion and backend inference configuration files. |
-| `html/` | UI HTML fragments and bundled license page. |
-| `localizations/` | Drop-in localization files. |
-| `models/` | Local runtime model files; ignored by Git. Do not commit checkpoints or generated weights. |
-| `requirements*.txt` | Runtime, pinned, NPU, and test Python dependency sets. |
-| `.github/workflows/` | Lint, test, and PR-base CI definitions. |
-
-## Generated and local-only files
-
-- Do not commit virtual environments, `node_modules/`, models/checkpoints, `outputs/`, coverage data, local config, or test outputs; these are ignored in `.gitignore`.
-- `webui-user.sh` and `webui-user.bat` are local override files and are ignored.
+- `modules/` — core Python application, launch support, processing, model integration, UI, and API code.
+- `modules/api/` — API implementation.
+- `modules/dml/`, `modules/onnx_impl/` — DirectML and ONNX support.
+- `modules/flash_attn_triton_amd/` — AMD Triton flash-attention implementation.
+- `scripts/` — built-in selectable processing and post-processing scripts.
+- `extensions-builtin/` — extensions shipped with the repository.
+- `extensions/` — locally installed third-party extensions; excluded from Ruff checks.
+- `javascript/`, `script.js`, `style.css` — browser-side behavior and global styling.
+- `html/` — UI fragments and static HTML assets.
+- `test/` — pytest suite, fixtures, input files, and generated test outputs.
+- `configs/` — model inference configuration files.
+- `models/` — local model weights organized by model type.
+- `embeddings/` — textual-inversion embeddings.
+- `localizations/` — translation files.
+- `textual_inversion_templates/` — prompt templates for training.
